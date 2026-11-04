@@ -2,7 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AI Cover Letter Generator",
+  title: "CoverCraft: AI Cover Letter Generator",
+  applicationName: "CoverCraft",
   description:
     "Paste your resume and a job description to generate a tailored, editable cover letter with Claude. Export to Word, PDF, or plain text.",
 };

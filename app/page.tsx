@@ -233,10 +233,10 @@ export default function Home() {
               </div>
               <div>
                 <h1 className="text-base font-semibold text-slate-900 sm:text-lg">
-                  AI Cover Letter Generator
+                  Cover<span className="text-indigo-600">Craft</span>
                 </h1>
                 <p className="hidden text-xs text-slate-500 sm:block">
-                  Tailored to the role, grounded in your resume.
+                  AI cover letters, tailored to the role and grounded in your resume.
                 </p>
               </div>
             </div>

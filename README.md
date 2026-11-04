@@ -1,6 +1,8 @@
-# AI Cover Letter Generator
+# CoverCraft
 
-A single-page Next.js app that turns your resume and a job posting into a tailored cover letter using Claude. You can edit the letter in place, then export it as **Word (.docx)**, **PDF**, or **plain text**, or copy it to the clipboard.
+**AI cover letters, tailored to the role and grounded in your resume.**
+
+CoverCraft is a single-page Next.js app that turns your resume and a job posting into a tailored cover letter using Claude. You can edit the letter in place, then export it as **Word (.docx)**, **PDF**, or **plain text**, or copy it to the clipboard.
 
 ![Stack](https://img.shields.io/badge/Next.js-16-black) ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue) ![Tailwind](https://img.shields.io/badge/Tailwind_CSS-4-38bdf8)
 

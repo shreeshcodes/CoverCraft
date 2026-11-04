@@ -39,7 +39,7 @@ export async function downloadDocx(text: string, fileBaseName: string): Promise<
   );
 
   const doc = new Document({
-    creator: "AI Cover Letter Generator",
+    creator: "CoverCraft",
     title: "Cover Letter",
     styles: {
       default: {
