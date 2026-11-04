@@ -109,7 +109,7 @@ function parseCoverLetter(raw: string): CoverLetter {
 // Google returns these when the model is busy or the free-tier rate limit is hit.
 // They usually clear within seconds, so retry with exponential backoff.
 const RETRYABLE_STATUS = new Set([429, 500, 503, 504]);
-const MAX_ATTEMPTS = 4;
+const MAX_ATTEMPTS = 2;
 
 async function generateWithRetry(ai: GoogleGenAI, params: GenerateContentParameters) {
   for (let attempt = 1; ; attempt++) {
@@ -122,6 +122,31 @@ async function generateWithRetry(ai: GoogleGenAI, params: GenerateContentParamet
       await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** (attempt - 1)));
     }
   }
+}
+
+// Backup models, tried in order when the primary model is busy (429/5xx) or
+// unavailable (404). Models the account can't use are skipped automatically.
+const FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3.5-flash-lite"];
+
+async function generateWithFallback(
+  ai: GoogleGenAI,
+  models: string[],
+  params: Omit<GenerateContentParameters, "model">,
+) {
+  let lastError: unknown;
+  for (const model of models) {
+    try {
+      return await generateWithRetry(ai, { ...params, model });
+    } catch (error) {
+      lastError = error;
+      const skippable =
+        error instanceof ApiError &&
+        (RETRYABLE_STATUS.has(error.status) || error.status === 404);
+      if (!skippable) throw error;
+      console.warn(`[api/generate] ${model} unavailable (${(error as ApiError).status}); trying next model`);
+    }
+  }
+  throw lastError;
 }
 
 export async function POST(request: Request) {
@@ -162,6 +187,7 @@ export async function POST(request: Request) {
 
   // ---- Call Gemini -----------------------------------------------------------
   const model = process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL;
+  const modelChain = [model, ...FALLBACK_MODELS.filter((m) => m !== model)];
 
   const userPrompt = [
     `Applicant name: ${applicantName || "(not provided; use the name from the resume, if present)"}`,
@@ -180,8 +206,7 @@ export async function POST(request: Request) {
 
   try {
     const ai = new GoogleGenAI({ apiKey });
-    const response = await generateWithRetry(ai, {
-      model,
+    const response = await generateWithFallback(ai, modelChain, {
       contents: userPrompt,
       config: {
         systemInstruction: SYSTEM_PROMPT,
