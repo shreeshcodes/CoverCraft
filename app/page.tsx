@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { signIn, signOut, useSession } from "next-auth/react";
+import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
 import {
   buildFileBaseName,
   buildPlainText,
@@ -87,8 +87,9 @@ export default function Home() {
   const [isExportingDocx, setIsExportingDocx] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>({ state: "idle" });
-  const { data: session, status: authStatus } = useSession();
-  const isSignedIn = authStatus === "authenticated";
+  const { isLoaded, isSignedIn: clerkSignedIn } = useUser();
+  const isSignedIn = isLoaded && !!clerkSignedIn;
+  const authStatus = !isLoaded ? "loading" : isSignedIn ? "authenticated" : "unauthenticated";
 
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -315,9 +316,7 @@ export default function Home() {
             >
               Load example
             </button>
-            {isSignedIn && session?.user && (
-              <AccountChip name={session.user.name ?? session.user.email ?? "Signed in"} image={session.user.image} />
-            )}
+            {isSignedIn && <UserButton />}
             </div>
           </div>
         </header>
@@ -848,55 +847,15 @@ function SignInPanel() {
   return (
     <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
       <p className="text-sm font-semibold text-slate-900">Sign in to generate letters</p>
-      <p className="mt-1 text-xs text-slate-600">Use your Google or LinkedIn account to continue.</p>
-      <div className="mt-3 flex flex-col gap-2">
+      <p className="mt-1 text-xs text-slate-600">Sign in with your email, Google, or LinkedIn to continue.</p>
+      <SignInButton mode="modal">
         <button
           type="button"
-          onClick={() => void signIn("google", { callbackUrl: "/" })}
-          className="flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-xs hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+          className="mt-3 w-full rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
         >
-          <GoogleIcon className="h-4 w-4" />
-          Continue with Google
+          Sign in
         </button>
-        <button
-          type="button"
-          onClick={() => void signIn("linkedin", { callbackUrl: "/" })}
-          className="flex items-center justify-center gap-2 rounded-lg bg-[#0a66c2] px-3 py-2 text-sm font-medium text-white shadow-xs hover:bg-[#004182] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-        >
-          <LinkedInIcon className="h-4 w-4" />
-          Continue with LinkedIn
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function AccountChip({ name, image }: { name: string; image?: string | null }) {
-  return (
-    <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white py-1 pl-1 pr-3 text-xs text-slate-700">
-      {image ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={image}
-          alt=""
-          width={24}
-          height={24}
-          referrerPolicy="no-referrer"
-          className="h-6 w-6 rounded-full"
-        />
-      ) : (
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 text-[11px] font-semibold text-indigo-700">
-          {name.slice(0, 1).toUpperCase()}
-        </span>
-      )}
-      <span className="max-w-[140px] truncate">{name}</span>
-      <button
-        type="button"
-        onClick={() => void signOut({ callbackUrl: "/" })}
-        className="ml-1 font-medium text-indigo-700 hover:underline"
-      >
-        Sign out
-      </button>
+      </SignInButton>
     </div>
   );
 }
@@ -970,25 +929,6 @@ function PenIcon({ className }: IconProps) {
     <svg {...svgProps(className)}>
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
-    </svg>
-  );
-}
-
-function GoogleIcon({ className }: IconProps) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" aria-hidden>
-      <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.8z" />
-      <path fill="#34A853" d="M12 24c3.2 0 6-1.1 7.9-2.9l-3.9-3a7.3 7.3 0 0 1-10.9-3.8H1.1v3.1A12 12 0 0 0 12 24z" />
-      <path fill="#FBBC05" d="M5.1 14.3a7.2 7.2 0 0 1 0-4.6V6.6H1.1a12 12 0 0 0 0 10.8l4-3.1z" />
-      <path fill="#EA4335" d="M12 4.8c1.8 0 3.4.6 4.6 1.8l3.5-3.5A12 12 0 0 0 1.1 6.6l4 3.1A7.2 7.2 0 0 1 12 4.8z" />
-    </svg>
-  );
-}
-
-function LinkedInIcon({ className }: IconProps) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M20.45 20.45h-3.56v-5.57c0-1.33-.03-3.04-1.85-3.04-1.86 0-2.14 1.45-2.14 2.95v5.66H9.34V9h3.42v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.07 2.07 0 1 1 0-4.14 2.07 2.07 0 0 1 0 4.14zM7.12 20.45H3.56V9h3.56v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z" />
     </svg>
   );
 }

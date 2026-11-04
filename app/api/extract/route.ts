@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { auth } from "@clerk/nextjs/server";
 import mammoth from "mammoth";
 import { extractText } from "unpdf";
 import { MAX_RESUME_CHARS, type GenerateErrorResponse } from "@/lib/types";
@@ -37,9 +37,9 @@ function normalizeText(text: string): string {
 }
 
 export async function POST(request: Request) {
-  const session = await auth();
-  if (!session?.user) {
-    return errorResponse(401, "Sign in to upload a resume.", "Use Google or LinkedIn on the home page.");
+  const { userId } = await auth();
+  if (!userId) {
+    return errorResponse(401, "Sign in to upload a resume.", "Sign in with email, Google, or LinkedIn on the home page.");
   }
 
   let form: FormData;
