@@ -1,4 +1,9 @@
-import { ApiError, FinishReason, GoogleGenAI } from "@google/genai";
+import {
+  ApiError,
+  FinishReason,
+  GoogleGenAI,
+  type GenerateContentParameters,
+} from "@google/genai";
 import { NextResponse } from "next/server";
 import {
   COVER_LETTER_FIELDS,
@@ -101,6 +106,24 @@ function parseCoverLetter(raw: string): CoverLetter {
   return letter;
 }
 
+// Google returns these when the model is busy or the free-tier rate limit is hit.
+// They usually clear within seconds, so retry with exponential backoff.
+const RETRYABLE_STATUS = new Set([429, 500, 503, 504]);
+const MAX_ATTEMPTS = 4;
+
+async function generateWithRetry(ai: GoogleGenAI, params: GenerateContentParameters) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await ai.models.generateContent(params);
+    } catch (error) {
+      const retryable = error instanceof ApiError && RETRYABLE_STATUS.has(error.status);
+      if (!retryable || attempt >= MAX_ATTEMPTS) throw error;
+      console.warn(`[api/generate] Gemini returned ${(error as ApiError).status}; retry ${attempt}`);
+      await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** (attempt - 1)));
+    }
+  }
+}
+
 export async function POST(request: Request) {
   // ---- Validate input ------------------------------------------------------
   let body: unknown;
@@ -157,7 +180,7 @@ export async function POST(request: Request) {
 
   try {
     const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
+    const response = await generateWithRetry(ai, {
       model,
       contents: userPrompt,
       config: {
