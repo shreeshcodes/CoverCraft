@@ -18,9 +18,9 @@ export const maxDuration = 60;
 
 // Groq's API is OpenAI-compatible, so the official OpenAI SDK works against it.
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
-const DEFAULT_MODEL = "llama-3.3-70b-versatile";
+const DEFAULT_MODEL = "openai/gpt-oss-120b";
 // Backup models, tried in order when the primary is busy (429/5xx) or unavailable (404).
-const FALLBACK_MODELS = ["llama-3.1-8b-instant"];
+const FALLBACK_MODELS = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"];
 
 const SYSTEM_PROMPT = `You are a top-tier career strategist and executive cover-letter writer. You turn an applicant's resume and a target job posting into a compelling, tailored cover letter that gets interviews.
 
@@ -73,7 +73,13 @@ function isTone(value: string): value is Tone {
 }
 
 function parseCoverLetter(raw: string): CoverLetter {
-  const parsed: unknown = JSON.parse(raw);
+  // Models sometimes wrap JSON in prose or code fences, so take the outermost object.
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start === -1 || end <= start) {
+    throw new Error("Model output did not contain a JSON object.");
+  }
+  const parsed: unknown = JSON.parse(raw.slice(start, end + 1));
   if (typeof parsed !== "object" || parsed === null) {
     throw new Error("Model output was not a JSON object.");
   }
@@ -111,7 +117,6 @@ async function completeWithRetry(
       return await client.chat.completions.create({
         model,
         messages,
-        response_format: { type: "json_object" },
       });
     } catch (error) {
       const retryable = error instanceof OpenAI.APIError && RETRYABLE_STATUS.has(error.status ?? 0);

@@ -32,7 +32,7 @@ Open http://localhost:3000.
 | Variable            | Required | Description                                                                 |
 | ------------------- | -------- | --------------------------------------------------------------------------- |
 | `GROQ_API_KEY`      | Yes      | Your key from https://console.groq.com/keys. Server-side only.               |
-| `GROQ_MODEL`        | No       | Model ID. Defaults to `llama-3.3-70b-versatile`.                             |
+| `GROQ_MODEL`        | No       | Model ID. Defaults to `openai/gpt-oss-120b`.                             |
 
 The API key is read only in the server route. It never reaches the browser.
 
@@ -67,7 +67,7 @@ Success (`200`):
 
 Errors return `{ "error": string, "details"?: string }`. The status is `400` for invalid input and `500` when the Groq call fails (bad or missing key, rate limit, refusal, unknown model, and so on).
 
-The response is requested in JSON mode (`response_format: json_object`), and every field is checked before the letter is returned.
+The reply is parsed as JSON, and every field is checked before the letter is returned.
 
 ## Project structure
 
