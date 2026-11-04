@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-letter: "Charter", "Bitstream Charter", "Sitka Text", Cambria, Georgia, "Times New Roman",
+    serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  background-color: #f4f5f7;
+  color: #0f172a;
+}
+
+/* The editable letter: looks like text on a page, not a form control. */
+.letter-editor {
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  border: 0;
+  outline: none;
+  width: 100%;
+}
+
+.letter-text {
+  font-family: var(--font-letter);
+  font-size: 15px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* Print-only copy of the letter is hidden on screen. */
+.print-only {
+  display: none;
+}
+
+/* ---------------------------------------------------------------------------
+ * PDF export via window.print()
+ * Only the cover letter is rendered: every piece of app UI (inputs, buttons,
+ * toolbars, backgrounds, shadows) is stripped, leaving a clean letter page.
+ * ------------------------------------------------------------------------- */
+@media print {
+  @page {
+    size: letter;
+    margin: 1in;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .no-print,
+  button,
+  input,
+  select,
+  textarea,
+  nav,
+  header,
+  footer {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  #print-letter {
+    box-shadow: none !important;
+    border: 0 !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  #print-letter .letter-text {
+    font-size: 11.5pt;
+    line-height: 1.5;
+    color: #000000;
+    orphans: 3;
+    widows: 3;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
