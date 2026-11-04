@@ -20,7 +20,7 @@ export const maxDuration = 60;
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 const DEFAULT_MODEL = "llama-3.3-70b-versatile";
 // Backup models, tried in order when the primary is busy (429/5xx) or unavailable (404).
-const FALLBACK_MODELS = ["llama-3.1-8b-instant", "gemma2-9b-it"];
+const FALLBACK_MODELS = ["llama-3.1-8b-instant"];
 
 const SYSTEM_PROMPT = `You are a top-tier career strategist and executive cover-letter writer. You turn an applicant's resume and a target job posting into a compelling, tailored cover letter that gets interviews.
 
@@ -132,9 +132,14 @@ async function completeWithFallback(
       return await completeWithRetry(client, model, messages);
     } catch (error) {
       lastError = error;
+      // 404 = unknown model; 400 "decommissioned" = model retired by the provider.
+      const decommissioned =
+        error instanceof OpenAI.APIError &&
+        error.status === 400 &&
+        /decommissioned|no longer supported/i.test(error.message);
       const skippable =
         error instanceof OpenAI.APIError &&
-        (RETRYABLE_STATUS.has(error.status ?? 0) || error.status === 404);
+        (RETRYABLE_STATUS.has(error.status ?? 0) || error.status === 404 || decommissioned);
       if (!skippable) throw error;
       console.warn(`[api/generate] ${model} unavailable (${error.status}); trying next model`);
     }
