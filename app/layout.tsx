@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   title: "CoverCraft: AI Cover Letter Generator",
   applicationName: "CoverCraft",
   description:
-    "Paste your resume and a job description to generate a tailored, editable cover letter with xAI Grok. Export to Word, PDF, or plain text.",
+    "Paste your resume and a job description to generate a tailored, editable cover letter with Google Gemini. Export to Word, PDF, or plain text.",
 };
 
 export const viewport: Viewport = {
