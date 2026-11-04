@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
-const MAX_FILE_BYTES = 5 * 1024 * 1024;
+const MAX_FILE_BYTES = 4 * 1024 * 1024; // Vercel caps request bodies at about 4.5 MB
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 type FileKind = "pdf" | "docx" | "txt";
@@ -57,7 +57,7 @@ export async function POST(request: Request) {
     return errorResponse(400, "The file is empty.");
   }
   if (file.size > MAX_FILE_BYTES) {
-    return errorResponse(413, "The file is larger than 5 MB.", "Export a smaller PDF, or paste the text instead.");
+    return errorResponse(413, "The file is larger than 4 MB.", "Export a smaller PDF, or paste the text instead.");
   }
 
   const kind = detectKind(file);

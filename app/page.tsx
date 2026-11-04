@@ -805,7 +805,7 @@ function ResumeUpload({
             <UploadIcon className="h-5 w-5 text-indigo-600" />
             <span className="font-medium text-slate-700">Upload your resume</span>
             <span className="text-xs text-slate-500">
-              PDF, DOCX, or TXT · up to 5 MB · drop a file here or click to browse
+              PDF, DOCX, or TXT · up to 4 MB · drop a file here or click to browse
             </span>
           </>
         )}
