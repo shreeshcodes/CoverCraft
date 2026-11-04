@@ -16,8 +16,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// Gemini 2.5 Flash is on Google's free tier. Override with GEMINI_MODEL.
-const DEFAULT_MODEL = "gemini-2.5-flash";
+// gemini-2.5-flash is no longer available to new accounts. Override with GEMINI_MODEL.
+const DEFAULT_MODEL = "gemini-3.8-flash";
 
 const SYSTEM_PROMPT = `You are a top-tier career strategist and executive cover-letter writer. You turn an applicant's resume and a target job posting into a compelling, tailored cover letter that gets interviews.
 
@@ -231,7 +231,7 @@ export async function POST(request: Request) {
         return errorResponse(
           500,
           `Model "${model}" was not found.`,
-          "Check GEMINI_MODEL, or unset it to use the default.",
+          error.message,
         );
       }
       if (error.status === 429) {

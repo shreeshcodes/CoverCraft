@@ -32,7 +32,7 @@ Open http://localhost:3000.
 | Variable            | Required | Description                                                                 |
 | ------------------- | -------- | --------------------------------------------------------------------------- |
 | `GEMINI_API_KEY`    | Yes      | A free key from https://aistudio.google.com/apikey. Server-side only.         |
-| `GEMINI_MODEL`      | No       | Gemini model ID. Defaults to `gemini-2.5-flash`.                             |
+| `GEMINI_MODEL`      | No       | Gemini model ID. Defaults to `gemini-3.8-flash`.                             |
 
 The API key is read only in the server route. It never reaches the browser.
 
