@@ -1,9 +1,4 @@
-import {
-  ApiError,
-  FinishReason,
-  GoogleGenAI,
-  type GenerateContentParameters,
-} from "@google/genai";
+import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import {
   COVER_LETTER_FIELDS,
@@ -16,13 +11,16 @@ import {
   type Tone,
 } from "@/lib/types";
 
-// The Gemini SDK needs the Node.js runtime, and generation can take a while.
+// The OpenAI SDK needs the Node.js runtime, and generation can take a while.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// gemini-2.5-flash is no longer available to new accounts. Override with GEMINI_MODEL.
-const DEFAULT_MODEL = "gemini-3.8-flash";
+// xAI's API is OpenAI-compatible, so the official OpenAI SDK works against it.
+const XAI_BASE_URL = "https://api.x.ai/v1";
+const DEFAULT_MODEL = "grok-4.7";
+// Backup models, tried in order when the primary is busy (429/5xx) or unavailable (404).
+const FALLBACK_MODELS = ["grok-4.5", "grok-4.20-non-reasoning", "grok-3-mini"];
 
 const SYSTEM_PROMPT = `You are a top-tier career strategist and executive cover-letter writer. You turn an applicant's resume and a target job posting into a compelling, tailored cover letter that gets interviews.
 
@@ -40,7 +38,9 @@ Return each part of the letter in its own field:
 - body: the middle paragraph(s), separated by a blank line.
 - closing: the final paragraph.
 - signoff: the valediction and the applicant's name on separate lines, e.g. "Sincerely,\\nJane Doe".
-- fullText: the complete letter, ready to send: recipient, greeting, opening, body, closing, and signoff in that order, with a blank line between each part. Do not include a date or the applicant's contact details unless they appear in the resume.`;
+- fullText: the complete letter, ready to send: recipient, greeting, opening, body, closing, and signoff in that order, with a blank line between each part. Do not include a date or the applicant's contact details unless they appear in the resume.
+
+Respond with a single JSON object containing exactly these seven string fields and nothing else.`;
 
 const TONE_GUIDANCE: Record<Tone, string> = {
   Professional:
@@ -63,6 +63,10 @@ const COVER_LETTER_SCHEMA: Record<string, unknown> = {
   required: [...COVER_LETTER_FIELDS],
   additionalProperties: false,
 };
+
+// Google-style busy/rate-limit statuses; xAI uses the same HTTP codes.
+const RETRYABLE_STATUS = new Set([429, 500, 503, 504]);
+const MAX_ATTEMPTS = 2;
 
 function errorResponse(status: number, error: string, details?: string) {
   const payload: GenerateErrorResponse = details ? { error, details } : { error };
@@ -106,44 +110,45 @@ function parseCoverLetter(raw: string): CoverLetter {
   return letter;
 }
 
-// Google returns these when the model is busy or the free-tier rate limit is hit.
-// They usually clear within seconds, so retry with exponential backoff.
-const RETRYABLE_STATUS = new Set([429, 500, 503, 504]);
-const MAX_ATTEMPTS = 2;
-
-async function generateWithRetry(ai: GoogleGenAI, params: GenerateContentParameters) {
+async function completeWithRetry(
+  client: OpenAI,
+  model: string,
+  messages: OpenAI.Chat.ChatCompletionMessageParam[],
+) {
   for (let attempt = 1; ; attempt++) {
     try {
-      return await ai.models.generateContent(params);
+      return await client.chat.completions.create({
+        model,
+        messages,
+        response_format: {
+          type: "json_schema",
+          json_schema: { name: "cover_letter", schema: COVER_LETTER_SCHEMA, strict: false },
+        },
+      });
     } catch (error) {
-      const retryable = error instanceof ApiError && RETRYABLE_STATUS.has(error.status);
+      const retryable = error instanceof OpenAI.APIError && RETRYABLE_STATUS.has(error.status ?? 0);
       if (!retryable || attempt >= MAX_ATTEMPTS) throw error;
-      console.warn(`[api/generate] Gemini returned ${(error as ApiError).status}; retry ${attempt}`);
       await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** (attempt - 1)));
     }
   }
 }
 
-// Backup models, tried in order when the primary model is busy (429/5xx) or
-// unavailable (404). Models the account can't use are skipped automatically.
-const FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3.5-flash-lite"];
-
-async function generateWithFallback(
-  ai: GoogleGenAI,
+async function completeWithFallback(
+  client: OpenAI,
   models: string[],
-  params: Omit<GenerateContentParameters, "model">,
+  messages: OpenAI.Chat.ChatCompletionMessageParam[],
 ) {
   let lastError: unknown;
   for (const model of models) {
     try {
-      return await generateWithRetry(ai, { ...params, model });
+      return await completeWithRetry(client, model, messages);
     } catch (error) {
       lastError = error;
       const skippable =
-        error instanceof ApiError &&
-        (RETRYABLE_STATUS.has(error.status) || error.status === 404);
+        error instanceof OpenAI.APIError &&
+        (RETRYABLE_STATUS.has(error.status ?? 0) || error.status === 404);
       if (!skippable) throw error;
-      console.warn(`[api/generate] ${model} unavailable (${(error as ApiError).status}); trying next model`);
+      console.warn(`[api/generate] ${model} unavailable (${error.status}); trying next model`);
     }
   }
   throw lastError;
@@ -176,18 +181,18 @@ export async function POST(request: Request) {
     return errorResponse(400, `jobText must be at most ${MAX_JOB_CHARS} characters.`);
   }
 
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  const apiKey = process.env.XAI_API_KEY?.trim();
   if (!apiKey) {
     return errorResponse(
       500,
-      "Server is missing GEMINI_API_KEY.",
-      "Add GEMINI_API_KEY to .env.local (see .env.example) and restart the server.",
+      "Server is missing XAI_API_KEY.",
+      "Add XAI_API_KEY to .env.local (see .env.example) and restart the server.",
     );
   }
 
-  // ---- Call Gemini -----------------------------------------------------------
-  const model = process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL;
-  const modelChain = [model, ...FALLBACK_MODELS.filter((m) => m !== model)];
+  // ---- Call Grok -------------------------------------------------------------
+  const primaryModel = process.env.XAI_MODEL?.trim() || DEFAULT_MODEL;
+  const modelChain = [primaryModel, ...FALLBACK_MODELS.filter((m) => m !== primaryModel)];
 
   const userPrompt = [
     `Applicant name: ${applicantName || "(not provided; use the name from the resume, if present)"}`,
@@ -205,51 +210,32 @@ export async function POST(request: Request) {
   ].join("\n");
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await generateWithFallback(ai, modelChain, {
-      contents: userPrompt,
-      config: {
-        systemInstruction: SYSTEM_PROMPT,
-        responseMimeType: "application/json",
-        responseJsonSchema: COVER_LETTER_SCHEMA,
-        // Thinking tokens count toward this limit, so leave generous headroom.
-        maxOutputTokens: 16384,
-      },
-    });
+    // maxRetries is 0 because completeWithRetry handles retries with bounded timing.
+    const client = new OpenAI({ apiKey, baseURL: XAI_BASE_URL, maxRetries: 0, timeout: 55_000 });
+    const completion = await completeWithFallback(client, modelChain, [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: userPrompt },
+    ]);
 
-    const blockReason = response.promptFeedback?.blockReason;
-    if (blockReason) {
-      return errorResponse(
-        500,
-        "Gemini declined to write this cover letter.",
-        `Prompt was blocked (${blockReason}). Try rephrasing or trimming the input.`,
-      );
-    }
-
-    const finishReason = response.candidates?.[0]?.finishReason;
-    if (finishReason === FinishReason.MAX_TOKENS) {
+    const choice = completion.choices[0];
+    if (choice?.finish_reason === "length") {
       return errorResponse(
         500,
         "The response was cut off before the letter was complete.",
         "Try shortening the resume or job description and generate again.",
       );
     }
-    if (
-      finishReason === FinishReason.SAFETY ||
-      finishReason === FinishReason.BLOCKLIST ||
-      finishReason === FinishReason.PROHIBITED_CONTENT ||
-      finishReason === FinishReason.SPII
-    ) {
+    if (choice?.finish_reason === "content_filter") {
       return errorResponse(
         500,
-        "Gemini declined to write this cover letter.",
-        `Response was stopped (${finishReason}). Try rephrasing or trimming the input.`,
+        "Grok declined to write this cover letter.",
+        "Try rephrasing or trimming the input.",
       );
     }
 
-    const text = response.text?.trim();
+    const text = choice?.message?.content?.trim();
     if (!text) {
-      return errorResponse(500, "Gemini returned an empty response.");
+      return errorResponse(500, "Grok returned an empty response.");
     }
 
     let letter: CoverLetter;
@@ -265,38 +251,32 @@ export async function POST(request: Request) {
 
     return NextResponse.json(letter);
   } catch (error) {
-    console.error("[api/generate] Gemini request failed:", error);
+    console.error("[api/generate] xAI request failed:", error);
 
-    if (error instanceof ApiError) {
-      if (error.status === 401 || error.status === 403) {
+    if (error instanceof OpenAI.APIError) {
+      const status = error.status;
+      if (status === 401 || status === 403) {
         return errorResponse(
           500,
-          "Gemini rejected the API key.",
-          "Check GEMINI_API_KEY and that the Gemini API is enabled for its project.",
+          "xAI rejected the API key.",
+          "Check XAI_API_KEY in .env.local and restart the server.",
         );
       }
-      if (error.status === 404) {
+      if (status === 404) {
         return errorResponse(
           500,
-          `Model "${model}" was not found.`,
+          "No available Grok model was found for this key.",
           error.message,
         );
       }
-      if (error.status === 429) {
+      if (status === 429) {
         return errorResponse(
           500,
-          "Rate limited by the Gemini API.",
-          "The free tier has per-minute and daily limits. Wait a moment and retry.",
+          "Rate limited by the xAI API.",
+          "Wait a minute and try again.",
         );
       }
-      if (error.status === 400 && /api key/i.test(error.message)) {
-        return errorResponse(500, "Gemini rejected the API key.", "Check GEMINI_API_KEY.");
-      }
-      return errorResponse(
-        500,
-        `Gemini API error (${error.status}).`,
-        error.message,
-      );
+      return errorResponse(500, `xAI API error${status ? ` (${status})` : ""}.`, error.message);
     }
 
     return errorResponse(
