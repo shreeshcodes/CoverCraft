@@ -8,6 +8,7 @@ CoverCraft is a single-page Next.js app that turns your resume and a job posting
 
 ## Features
 
+- **Resume upload:** drop or choose a PDF, DOCX, or TXT file (up to 5 MB) and its text fills the resume box. Scanned PDFs without a text layer can't be read, so paste those instead.
 - **Grounded generation:** The AI model acts as a career strategist and writes only from facts in your resume, matched against the job's requirements.
 - **Tone control:** Professional, Confident & Bold, Modern Startup, Warm & Personable, or Concise & Direct.
 - **Live editable preview:** the letter renders on a document-style page that you can edit directly.

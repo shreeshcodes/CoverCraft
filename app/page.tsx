@@ -24,6 +24,11 @@ import {
 
 type ErrorState = { message: string; details?: string } | null;
 type CopyState = "idle" | "copied" | "failed";
+type UploadStatus =
+  | { state: "idle" }
+  | { state: "reading"; fileName: string }
+  | { state: "done"; fileName: string; characters: number }
+  | { state: "error"; fileName: string; message: string; details?: string };
 
 const SAMPLE_RESUME = `JANE DOE
 jane.doe@email.com · Seattle, WA
@@ -80,6 +85,7 @@ export default function Home() {
   const [copyState, setCopyState] = useState<CopyState>("idle");
   const [isExportingDocx, setIsExportingDocx] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<UploadStatus>({ state: "idle" });
 
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -239,11 +245,44 @@ export default function Home() {
     copyTimerRef.current = setTimeout(() => setCopyState("idle"), 2000);
   };
 
+  const handleResumeFile = async (file: File) => {
+    setUploadStatus({ state: "reading", fileName: file.name });
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/extract", { method: "POST", body: form });
+      const data: unknown = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        const err = (data ?? {}) as Partial<GenerateErrorResponse>;
+        setUploadStatus({
+          state: "error",
+          fileName: file.name,
+          message: err.error || "Could not read this file.",
+          details: err.details,
+        });
+        return;
+      }
+
+      const { text } = data as { text: string };
+      setResumeText(text);
+      setUploadStatus({ state: "done", fileName: file.name, characters: text.length });
+    } catch (err) {
+      setUploadStatus({
+        state: "error",
+        fileName: file.name,
+        message: "Could not upload the file.",
+        details: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
   const loadSample = () => {
     setApplicantName("Jane Doe");
     setContactLine("jane.doe@email.com · Seattle, WA");
     setResumeText(SAMPLE_RESUME);
     setJobText(SAMPLE_JOB);
+    setUploadStatus({ state: "idle" });
   };
 
   return (
@@ -323,6 +362,7 @@ export default function Home() {
                 htmlFor="resumeText"
                 hint={`${resumeText.length.toLocaleString()} / ${MAX_RESUME_CHARS.toLocaleString()}`}
               >
+                <ResumeUpload status={uploadStatus} onFile={handleResumeFile} />
                 <textarea
                   id="resumeText"
                   required
@@ -692,6 +732,98 @@ function LetterSkeleton() {
   );
 }
 
+function ResumeUpload({
+  status,
+  onFile,
+}: {
+  status: UploadStatus;
+  onFile: (file: File) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const busy = status.state === "reading";
+
+  const openPicker = () => {
+    if (!busy) inputRef.current?.click();
+  };
+
+  return (
+    <div className="mb-2">
+      <div
+        role="button"
+        tabIndex={0}
+        aria-disabled={busy}
+        onClick={openPicker}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            openPicker();
+          }
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          const file = e.dataTransfer.files?.[0];
+          if (file && !busy) onFile(file);
+        }}
+        className={`flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed px-4 py-4 text-center text-sm transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 ${
+          dragging
+            ? "border-indigo-500 bg-indigo-50"
+            : "border-slate-300 bg-slate-50 hover:border-indigo-400 hover:bg-indigo-50/40"
+        } ${busy ? "cursor-wait opacity-70" : "cursor-pointer"}`}
+      >
+        {busy ? (
+          <>
+            <Spinner className="h-4 w-4 text-indigo-600" />
+            <span className="text-slate-700">Reading {status.fileName}…</span>
+          </>
+        ) : (
+          <>
+            <UploadIcon className="h-5 w-5 text-indigo-600" />
+            <span className="font-medium text-slate-700">Upload your resume</span>
+            <span className="text-xs text-slate-500">
+              PDF, DOCX, or TXT · up to 5 MB · drop a file here or click to browse
+            </span>
+          </>
+        )}
+      </div>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".pdf,.docx,.txt,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        className="sr-only"
+        tabIndex={-1}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) onFile(file);
+          e.target.value = "";
+        }}
+      />
+
+      {status.state === "done" && (
+        <p className="mt-2 text-xs text-emerald-700">
+          Loaded {status.fileName} ({status.characters.toLocaleString()} characters). Edit the text below if needed.
+        </p>
+      )}
+      {status.state === "error" && (
+        <div
+          role="alert"
+          className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800"
+        >
+          <p className="font-medium">{status.message}</p>
+          {status.details && <p className="mt-0.5">{status.details}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------------------------------------------------------------------------
  * Icons (inline SVG, no extra dependency)
  * ------------------------------------------------------------------------- */
@@ -761,6 +893,16 @@ function PenIcon({ className }: IconProps) {
     <svg {...svgProps(className)}>
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
+    </svg>
+  );
+}
+
+function UploadIcon({ className }: IconProps) {
+  return (
+    <svg {...svgProps(className)}>
+      <path d="M12 16V4" />
+      <path d="m7 9 5-5 5 5" />
+      <path d="M5 20h14" />
     </svg>
   );
 }
