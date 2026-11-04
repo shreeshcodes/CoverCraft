@@ -3,6 +3,13 @@
  * lazily so they only load when the user actually downloads a Word file.
  */
 
+export interface LetterHeader {
+  name: string;
+  contact: string;
+  date: string;
+  company: string;
+}
+
 export function buildFileBaseName(applicantName: string): string {
   const slug = applicantName
     .normalize("NFKD")
@@ -19,41 +26,120 @@ export function toParagraphs(text: string): string[][] {
     .replace(/\r\n?/g, "\n")
     .trim()
     .split(/\n\s*\n/)
+    .filter((paragraph) => paragraph.trim().length > 0)
     .map((paragraph) => paragraph.split("\n").map((line) => line.trimEnd()));
 }
 
-export async function downloadDocx(text: string, fileBaseName: string): Promise<void> {
-  const [{ Document, Packer, Paragraph, TextRun }, { saveAs }] = await Promise.all([
+/** Plain-text version of the full letter, header included, for .txt and clipboard. */
+export function buildPlainText(header: LetterHeader, bodyText: string): string {
+  const lines: string[] = [];
+  if (header.name) lines.push(header.name.toUpperCase());
+  if (header.contact) lines.push(header.contact);
+  if (lines.length > 0) lines.push("");
+  if (header.date) lines.push(header.date, "");
+  if (header.company) lines.push(header.company, "");
+  lines.push(bodyText.trim());
+  return lines.join("\n");
+}
+
+const LETTER_FONT = "Georgia";
+const HEADER_FONT = "Calibri";
+const RULE_COLOR = "B8BEC8";
+
+export async function downloadDocx(
+  header: LetterHeader,
+  bodyText: string,
+  fileBaseName: string,
+): Promise<void> {
+  const [{ Document, Packer, Paragraph, TextRun, BorderStyle }, { saveAs }] = await Promise.all([
     import("docx"),
     import("file-saver"),
   ]);
 
-  const paragraphs = toParagraphs(text).map(
-    (lines) =>
+  const children: InstanceType<typeof Paragraph>[] = [];
+
+  // Letterhead: bold uppercase name, contact subtitle, then a horizontal rule.
+  if (header.name) {
+    children.push(
       new Paragraph({
-        spacing: { after: 240, line: 300 },
+        spacing: { after: 60 },
+        children: [
+          new TextRun({
+            text: header.name.toUpperCase(),
+            bold: true,
+            size: 32, // 16pt (half-points)
+            font: HEADER_FONT,
+            characterSpacing: 40,
+          }),
+        ],
+      }),
+    );
+  }
+  children.push(
+    new Paragraph({
+      spacing: { after: 360 },
+      border: {
+        bottom: { style: BorderStyle.SINGLE, size: 6, color: RULE_COLOR, space: 10 },
+      },
+      children: header.contact
+        ? [new TextRun({ text: header.contact, size: 19, color: "5B6474", font: HEADER_FONT })]
+        : [],
+    }),
+  );
+
+  // Date and company block.
+  if (header.date) {
+    children.push(
+      new Paragraph({
+        spacing: { after: 240 },
+        children: [new TextRun({ text: header.date, font: LETTER_FONT, size: 22 })],
+      }),
+    );
+  }
+  if (header.company) {
+    children.push(
+      new Paragraph({
+        spacing: { after: 240 },
+        children: [new TextRun({ text: header.company, font: LETTER_FONT, size: 22 })],
+      }),
+    );
+  }
+
+  // Letter body: greeting, paragraphs, and signoff, one Word paragraph per block.
+  for (const lines of toParagraphs(bodyText)) {
+    children.push(
+      new Paragraph({
+        spacing: { after: 200, line: 300 },
         children: lines.map(
-          (line, index) => new TextRun({ text: line, break: index > 0 ? 1 : 0 }),
+          (line, index) =>
+            new TextRun({
+              text: line,
+              break: index > 0 ? 1 : 0,
+              font: LETTER_FONT,
+              size: 22,
+            }),
         ),
       }),
-  );
+    );
+  }
 
   const doc = new Document({
     creator: "CoverCraft",
     title: "Cover Letter",
     styles: {
       default: {
-        document: { run: { font: "Calibri", size: 23 } }, // 11.5pt (half-points)
+        document: { run: { font: LETTER_FONT, size: 22 } }, // 11pt (half-points)
       },
     },
     sections: [
       {
         properties: {
           page: {
-            margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 }, // 1 inch (twips)
+            size: { width: 12240, height: 15840 }, // US Letter (twips)
+            margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 }, // 1 inch
           },
         },
-        children: paragraphs,
+        children,
       },
     ],
   });
@@ -78,9 +164,9 @@ export function downloadTxt(text: string, fileBaseName: string): void {
 }
 
 /**
- * Opens the browser print dialog; the @media print rules in globals.css render
- * only the letter, so "Save as PDF" produces a clean document. The document
- * title is swapped so the suggested PDF file name matches the applicant.
+ * Opens the browser print dialog. The @media print rules in globals.css show
+ * only the letter, laid out on one US Letter page, so "Save as PDF" is clean.
+ * The document title is swapped so the suggested file name matches the applicant.
  */
 export function printToPdf(fileBaseName: string): void {
   const previousTitle = document.title;

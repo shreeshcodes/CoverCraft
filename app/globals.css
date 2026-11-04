@@ -3,8 +3,7 @@
 @theme {
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
     sans-serif;
-  --font-letter: "Charter", "Bitstream Charter", "Sitka Text", Cambria, Georgia, "Times New Roman",
-    serif;
+  --font-letter: Georgia, "Times New Roman", Times, serif;
 }
 
 :root {
@@ -17,8 +16,80 @@ body {
   color: #0f172a;
 }
 
-/* The editable letter: looks like text on a page, not a form control. */
+/* ---------------------------------------------------------------------------
+ * Letter sheet (on-screen preview). 816 x 1056 px is US Letter at 96 dpi, and
+ * 96 px padding is a 1-inch margin.
+ * ------------------------------------------------------------------------- */
+.letter-sheet {
+  position: relative;
+  width: 100%;
+  max-width: 816px;
+  min-height: 1056px;
+  margin: 0 auto;
+  padding: 96px;
+  background: #ffffff;
+  color: #111827;
+  font-family: var(--font-letter);
+  border-radius: 2px;
+  border: 1px solid #e5e7eb;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.06),
+    0 18px 40px -14px rgba(15, 23, 42, 0.22);
+}
+
+@media (max-width: 640px) {
+  .letter-sheet {
+    min-height: 0;
+    padding: 40px 28px;
+  }
+}
+
+.letter-name {
+  font-family: var(--font-sans);
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: #0f172a;
+}
+
+.letter-contact {
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  letter-spacing: 0.02em;
+  color: #5b6474;
+  margin-top: 0.5rem;
+}
+
+.letter-rule {
+  border: 0;
+  border-top: 1px solid #cbd1db;
+  margin: 1.25rem 0 2rem;
+}
+
+.letter-inline {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  outline: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  border-radius: 2px;
+}
+
+.letter-inline:focus {
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
+}
+
+.letter-inline::placeholder {
+  color: #9aa3b2;
+}
+
 .letter-editor {
+  display: block;
   resize: none;
   overflow: hidden;
   background: transparent;
@@ -30,7 +101,7 @@ body {
 .letter-text {
   font-family: var(--font-letter);
   font-size: 15px;
-  line-height: 1.65;
+  line-height: 1.7;
   white-space: pre-wrap;
   overflow-wrap: break-word;
 }
@@ -42,8 +113,8 @@ body {
 
 /* ---------------------------------------------------------------------------
  * PDF export via window.print()
- * Only the cover letter is rendered: every piece of app UI (inputs, buttons,
- * toolbars, backgrounds, shadows) is stripped, leaving a clean letter page.
+ * Only the letter renders, on one US Letter page with 1-inch margins. All app
+ * UI (inputs, buttons, toolbars, backgrounds, shadows) is hidden.
  * ------------------------------------------------------------------------- */
 @media print {
   @page {
@@ -59,35 +130,41 @@ body {
     padding: 0 !important;
   }
 
-  .no-print,
-  button,
-  input,
-  select,
-  textarea,
-  nav,
-  header,
-  footer {
+  .no-print {
     display: none !important;
   }
 
   .print-only {
     display: block !important;
-  }
-
-  #print-letter {
-    box-shadow: none !important;
-    border: 0 !important;
-    background: #ffffff !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    width: 100% !important;
-    max-width: none !important;
-  }
-
-  #print-letter .letter-text {
-    font-size: 11.5pt;
-    line-height: 1.5;
+    font-family: Georgia, "Times New Roman", Times, serif;
+    font-size: 11pt;
+    line-height: 1.45;
     color: #000000;
+  }
+
+  .print-only .print-name {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 16pt;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin: 0;
+  }
+
+  .print-only .print-contact {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 9.5pt;
+    color: #444444;
+    margin: 4pt 0 0;
+  }
+
+  .print-only .print-rule {
+    border-top: 0.75pt solid #999999;
+    margin: 10pt 0 16pt;
+  }
+
+  .print-only p {
+    margin: 0 0 10pt;
     orphans: 3;
     widows: 3;
   }

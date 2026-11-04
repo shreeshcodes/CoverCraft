@@ -1,10 +1,10 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import {
-  COVER_LETTER_FIELDS,
   MAX_JOB_CHARS,
   MAX_NAME_CHARS,
   MAX_RESUME_CHARS,
+  MODEL_FIELDS,
   TONES,
   type CoverLetter,
   type GenerateErrorResponse,
@@ -22,25 +22,33 @@ const DEFAULT_MODEL = "openai/gpt-oss-120b";
 // Backup models, tried in order when the primary is busy (429/5xx) or unavailable (404).
 const FALLBACK_MODELS = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"];
 
-const SYSTEM_PROMPT = `You are a top-tier career strategist and executive cover-letter writer. You turn an applicant's resume and a target job posting into a compelling, tailored cover letter that gets interviews.
+const SYSTEM_PROMPT = `You are an executive career coach who has placed senior candidates at leading companies. You write cover letters that read as if a sharp, experienced professional wrote them by hand: specific, confident, and concise. Generic letters get ignored, so every sentence must earn its place.
 
-Ground rules:
-- Use ONLY facts that appear in the resume: employers, titles, dates, metrics, skills, education, projects. Never invent or inflate experience, numbers, credentials, or company names. If the resume lacks something the job asks for, do not claim it. Lean on transferable strengths the resume actually shows.
-- Match the strongest resume evidence to the job's most important requirements. Prefer specific, quantified accomplishments over generic adjectives.
-- Name the company and role when the posting states them. If the hiring manager's name is not given, address the hiring team rather than guessing a name.
-- Keep the letter to roughly 250–400 words: an opening hook, one or two body paragraphs of evidence, and a forward-looking close with a clear call to action.
-- No clichés ("I am writing to express my interest", "team player", "think outside the box"), no placeholder brackets, and no markdown formatting.
+EVIDENCE RULES
+- Use ONLY facts that appear in the resume: employers, titles, dates, metrics, tools, projects, education. Never invent or inflate numbers, credentials, or company names.
+- When the resume gives a number (a percentage, dollar figure, time saved, team size, user count), use it. Prefer one concrete metric over any adjective.
+- Tie each body claim to a specific requirement in the job posting. Describe the requirement in your own plain words (for example, "moving a legacy codebase to a typed architecture") instead of quoting the posting.
+- If the resume lacks a requirement, do not claim it. Lead with the closest real strength instead.
 
-Return each part of the letter in its own field:
-- recipient: the addressee block (e.g. "Hiring Team\\nAcme Corp"), using newlines between lines.
-- greeting: the salutation line, e.g. "Dear Acme Hiring Team,".
-- opening: the first paragraph.
-- body: the middle paragraph(s), separated by a blank line.
-- closing: the final paragraph.
-- signoff: the valediction and the applicant's name on separate lines, e.g. "Sincerely,\\nJane Doe".
-- fullText: the complete letter, ready to send: recipient, greeting, opening, body, closing, and signoff in that order, with a blank line between each part. Do not include a date or the applicant's contact details unless they appear in the resume.
+BANNED PHRASES AND CLICHÉS (never use these or close paraphrases)
+- "I am writing to express my interest", "I am writing to apply", "I am excited to apply", "I am thrilled", "I am passionate about"
+- "With a track record of", "With X years of experience" as an opening
+- "Please consider my application", "I look forward to hearing from you", "I would welcome the opportunity to discuss", "I believe I would be a great asset"
+- "team player", "results-driven", "detail-oriented", "think outside the box", "synergy", "go-getter", "dynamic", "fast-paced environment", "hit the ground running", "perfect fit"
+- Sentences that start with "Additionally,", "Furthermore,", or "Moreover,"
+- Square-bracket placeholders, markdown, bullet points, emojis, and exclamation marks
 
-Respond with a single JSON object containing exactly these seven string fields and nothing else.`;
+STRUCTURE
+- opening: 2 to 3 sentences. Start with the hook itself: a concrete accomplishment or a sharp observation about the company's mission or the problem it solves. Name the role and why this problem matters to you. Do not start with a sentence about yourself.
+- body: one or two paragraphs separated by a blank line. Each paragraph ties one or two quantified achievements from the resume to specific requirements in the posting, explains the result, and shows how it transfers to this role.
+- closing: 2 to 3 sentences, confident and forward-looking. Describe the specific value you would add in the first months, or the problem you would tackle first. Do NOT ask for an interview, a call, or a meeting, and do not say you look forward to hearing back.
+- greeting: "Dear <Name>," if the posting or resume names a hiring manager; otherwise "Dear <Company> Hiring Team," or "Dear Hiring Team," if no company is named.
+- signoff: exactly two lines: "Sincerely," on the first line and the applicant's full name on the second.
+- company: the hiring company's name as written in the posting, or an empty string if it is not stated.
+- Length: 220 to 320 words across opening, body, and closing combined.
+
+OUTPUT
+Return ONLY a JSON object with these string keys: "company", "greeting", "opening", "body", "closing", "signoff". No markdown, no commentary. Separate body paragraphs with a blank line (\\n\\n). Put the signoff's two lines on separate lines (\\n).`;
 
 const TONE_GUIDANCE: Record<Tone, string> = {
   Professional:
@@ -72,7 +80,16 @@ function isTone(value: string): value is Tone {
   return (TONES as readonly string[]).includes(value);
 }
 
-function parseCoverLetter(raw: string): CoverLetter {
+function todayLongFormat(): string {
+  return new Date().toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+/** Reads the model's JSON reply and checks every field the model must provide. */
+function parseModelFields(raw: string): Omit<CoverLetter, "date" | "fullText"> {
   // Models sometimes wrap JSON in prose or code fences, so take the outermost object.
   const start = raw.indexOf("{");
   const end = raw.lastIndexOf("}");
@@ -84,26 +101,45 @@ function parseCoverLetter(raw: string): CoverLetter {
     throw new Error("Model output was not a JSON object.");
   }
   const record = parsed as Record<string, unknown>;
-  const letter = {} as CoverLetter;
-  for (const field of COVER_LETTER_FIELDS) {
+  const fields = {} as Record<(typeof MODEL_FIELDS)[number], string>;
+  for (const field of MODEL_FIELDS) {
     const value = record[field];
     if (typeof value !== "string") {
+      // The company name is optional; every other field is required.
+      if (field === "company") {
+        fields[field] = "";
+        continue;
+      }
       throw new Error(`Model output is missing the "${field}" field.`);
     }
-    letter[field] = value.trim();
+    fields[field] = value.trim();
   }
-  if (!letter.fullText) {
-    letter.fullText = [
-      letter.recipient,
-      letter.greeting,
-      letter.opening,
-      letter.body,
-      letter.closing,
-      letter.signoff,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+  return fields;
+}
+
+/** Builds the full letter. The date always comes from the server clock. */
+function buildLetter(
+  fields: Omit<CoverLetter, "date" | "fullText">,
+  date: string,
+  applicantName: string,
+): CoverLetter {
+  let signoff = fields.signoff;
+  // Make sure the signoff carries the applicant's name when we know it.
+  if (applicantName && !signoff.includes(applicantName)) {
+    signoff = `Sincerely,\n${applicantName}`;
   }
+  const letter: CoverLetter = { ...fields, signoff, date, fullText: "" };
+  letter.fullText = [
+    date,
+    fields.company,
+    fields.greeting,
+    fields.opening,
+    fields.body,
+    fields.closing,
+    signoff,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   return letter;
 }
 
@@ -114,10 +150,7 @@ async function completeWithRetry(
 ) {
   for (let attempt = 1; ; attempt++) {
     try {
-      return await client.chat.completions.create({
-        model,
-        messages,
-      });
+      return await client.chat.completions.create({ model, messages });
     } catch (error) {
       const retryable = error instanceof OpenAI.APIError && RETRYABLE_STATUS.has(error.status ?? 0);
       if (!retryable || attempt >= MAX_ATTEMPTS) throw error;
@@ -188,12 +221,14 @@ export async function POST(request: Request) {
     );
   }
 
-  // ---- Call Groq -------------------------------------------------------------
+  // ---- Call the model --------------------------------------------------------
   const primaryModel = process.env.GROQ_MODEL?.trim() || DEFAULT_MODEL;
   const modelChain = [primaryModel, ...FALLBACK_MODELS.filter((m) => m !== primaryModel)];
+  const date = todayLongFormat();
 
   const userPrompt = [
-    `Applicant name: ${applicantName || "(not provided; use the name from the resume, if present)"}`,
+    `Today's date: ${date}`,
+    `Applicant's full name: ${applicantName || "(not provided; use the name from the resume)"}`,
     `Tone: ${tone}. ${TONE_GUIDANCE[tone]}`,
     "",
     "<resume>",
@@ -204,7 +239,7 @@ export async function POST(request: Request) {
     jobText,
     "</job_description>",
     "",
-    "Write the tailored cover letter now.",
+    "Write the tailored cover letter now, following every rule in the system prompt.",
   ].join("\n");
 
   try {
@@ -236,9 +271,9 @@ export async function POST(request: Request) {
       return errorResponse(500, "The model returned an empty response.");
     }
 
-    let letter: CoverLetter;
+    let fields: Omit<CoverLetter, "date" | "fullText">;
     try {
-      letter = parseCoverLetter(text);
+      fields = parseModelFields(text);
     } catch (parseError) {
       return errorResponse(
         500,
@@ -247,7 +282,7 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json(letter);
+    return NextResponse.json(buildLetter(fields, date, applicantName));
   } catch (error) {
     console.error("[api/generate] Groq request failed:", error);
 
@@ -261,18 +296,10 @@ export async function POST(request: Request) {
         );
       }
       if (status === 404) {
-        return errorResponse(
-          500,
-          "No available Groq model was found for this key.",
-          error.message,
-        );
+        return errorResponse(500, "No available model was found for this key.", error.message);
       }
       if (status === 429) {
-        return errorResponse(
-          500,
-          "Rate limited by the Groq API.",
-          "Wait a minute and try again.",
-        );
+        return errorResponse(500, "Rate limited by the Groq API.", "Wait a minute and try again.");
       }
       return errorResponse(500, `Groq API error${status ? ` (${status})` : ""}.`, error.message);
     }

@@ -3,10 +3,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   buildFileBaseName,
+  buildPlainText,
   copyToClipboard,
   downloadDocx,
   downloadTxt,
   printToPdf,
+  toParagraphs,
+  type LetterHeader,
 } from "@/lib/export";
 import {
   MAX_JOB_CHARS,
@@ -58,15 +61,22 @@ You have:
 - Bonus: real-time data visualization experience`;
 
 export default function Home() {
+  // Inputs
   const [applicantName, setApplicantName] = useState("");
+  const [contactLine, setContactLine] = useState("");
   const [resumeText, setResumeText] = useState("");
   const [jobText, setJobText] = useState("");
   const [tone, setTone] = useState<Tone>("Professional");
 
+  // Letter, as it appears on the page
+  const [dateText, setDateText] = useState("");
+  const [company, setCompany] = useState("");
+  const [bodyText, setBodyText] = useState("");
+  const [isEdited, setIsEdited] = useState(false);
+
+  // UI state
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<ErrorState>(null);
-  const [letterText, setLetterText] = useState("");
-  const [isEdited, setIsEdited] = useState(false);
   const [copyState, setCopyState] = useState<CopyState>("idle");
   const [isExportingDocx, setIsExportingDocx] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -75,12 +85,18 @@ export default function Home() {
   const abortRef = useRef<AbortController | null>(null);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const hasLetter = letterText.trim().length > 0;
+  const hasLetter = bodyText.trim().length > 0;
   const canGenerate = resumeText.trim().length > 0 && jobText.trim().length > 0 && !isGenerating;
-  const wordCount = hasLetter ? letterText.trim().split(/\s+/).length : 0;
+  const header: LetterHeader = {
+    name: applicantName.trim(),
+    contact: contactLine.trim(),
+    date: dateText.trim(),
+    company: company.trim(),
+  };
+  const wordCount = hasLetter ? bodyText.trim().split(/\s+/).length : 0;
   const fileBaseName = buildFileBaseName(applicantName);
 
-  // Grow the editor to fit its content so the preview reads like a real page.
+  // Grow the editor to fit its content so the page reads like a real sheet.
   const resizeEditor = useCallback(() => {
     const el = editorRef.current;
     if (!el) return;
@@ -90,7 +106,7 @@ export default function Home() {
 
   useLayoutEffect(() => {
     resizeEditor();
-  }, [letterText, resizeEditor]);
+  }, [bodyText, resizeEditor]);
 
   useEffect(() => {
     window.addEventListener("resize", resizeEditor);
@@ -150,12 +166,19 @@ export default function Home() {
       }
 
       const letter = data as CoverLetter | null;
-      if (!letter || typeof letter.fullText !== "string" || !letter.fullText.trim()) {
+      if (!letter || typeof letter.greeting !== "string" || !letter.greeting.trim()) {
         setError({ message: "The server returned an empty cover letter. Please try again." });
         return;
       }
 
-      setLetterText(letter.fullText);
+      setDateText(letter.date ?? "");
+      setCompany(letter.company ?? "");
+      setBodyText(
+        [letter.greeting, letter.opening, letter.body, letter.closing, letter.signoff]
+          .map((part) => part?.trim())
+          .filter(Boolean)
+          .join("\n\n"),
+      );
       setIsEdited(false);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
@@ -176,7 +199,7 @@ export default function Home() {
     setExportError(null);
     setIsExportingDocx(true);
     try {
-      await downloadDocx(letterText, fileBaseName);
+      await downloadDocx(header, bodyText, fileBaseName);
     } catch (err) {
       setExportError(
         `Could not create the Word file: ${err instanceof Error ? err.message : String(err)}`,
@@ -190,7 +213,7 @@ export default function Home() {
     if (!hasLetter) return;
     setExportError(null);
     try {
-      downloadTxt(letterText, fileBaseName);
+      downloadTxt(buildPlainText(header, bodyText), fileBaseName);
     } catch (err) {
       setExportError(
         `Could not create the text file: ${err instanceof Error ? err.message : String(err)}`,
@@ -207,7 +230,7 @@ export default function Home() {
   const handleCopy = async () => {
     if (!hasLetter) return;
     try {
-      await copyToClipboard(letterText);
+      await copyToClipboard(buildPlainText(header, bodyText));
       setCopyState("copied");
     } catch {
       setCopyState("failed");
@@ -218,6 +241,7 @@ export default function Home() {
 
   const loadSample = () => {
     setApplicantName("Jane Doe");
+    setContactLine("jane.doe@email.com · Seattle, WA");
     setResumeText(SAMPLE_RESUME);
     setJobText(SAMPLE_JOB);
   };
@@ -273,6 +297,23 @@ export default function Home() {
                   maxLength={MAX_NAME_CHARS}
                   onChange={(e) => setApplicantName(e.target.value)}
                   placeholder="e.g. Jane Doe"
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field
+                label="Contact line for the letterhead (optional)"
+                htmlFor="contactLine"
+                hint="email · phone · city"
+              >
+                <input
+                  id="contactLine"
+                  type="text"
+                  autoComplete="off"
+                  value={contactLine}
+                  maxLength={160}
+                  onChange={(e) => setContactLine(e.target.value)}
+                  placeholder="jane@email.com · (555) 010-2030 · Seattle, WA"
                   className={inputClass}
                 />
               </Field>
@@ -380,7 +421,7 @@ export default function Home() {
                 </h2>
                 <p className="text-xs text-slate-500">
                   {hasLetter
-                    ? `${wordCount} words · Click the page to edit before downloading`
+                    ? `${wordCount} words · Click the letter to edit before downloading`
                     : "Your letter will appear here"}
                 </p>
               </div>
@@ -445,11 +486,9 @@ export default function Home() {
               </div>
             )}
 
-            {/* Document page */}
+            {/* Letter sheet */}
             <div
-              className={`relative mx-auto min-h-[720px] w-full max-w-[816px] rounded-sm bg-white px-7 py-10 shadow-[0_1px_3px_rgba(15,23,42,0.08),0_12px_32px_-8px_rgba(15,23,42,0.18)] ring-1 ring-slate-900/5 sm:px-16 sm:py-16 ${
-                hasLetter ? "cursor-text" : ""
-              }`}
+              className="letter-sheet"
               onClick={() => hasLetter && editorRef.current?.focus()}
             >
               {isGenerating && !hasLetter ? (
@@ -457,23 +496,66 @@ export default function Home() {
               ) : hasLetter ? (
                 <>
                   {isGenerating && (
-                    <div className="absolute inset-0 z-10 flex items-center justify-center rounded-sm bg-white/70 backdrop-blur-[1px]">
+                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 backdrop-blur-[1px]">
                       <div className="flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow ring-1 ring-slate-200">
                         <Spinner className="h-4 w-4 text-indigo-600" />
                         Rewriting…
                       </div>
                     </div>
                   )}
+
+                  <header>
+                    <p className={header.name ? "letter-name" : "letter-name text-slate-300"}>
+                      {header.name || "Your Name"}
+                    </p>
+                    {header.contact && <p className="letter-contact">{header.contact}</p>}
+                    <hr className="letter-rule" />
+                  </header>
+
+                  <div className="mb-6 text-[15px] text-slate-800">
+                    <label htmlFor="letterDate" className="sr-only">
+                      Letter date
+                    </label>
+                    <input
+                      id="letterDate"
+                      type="text"
+                      value={dateText}
+                      placeholder="Date"
+                      onChange={(e) => {
+                        setDateText(e.target.value);
+                        setIsEdited(true);
+                      }}
+                      className="letter-inline letter-text"
+                    />
+                  </div>
+
+                  <div className="mb-6 text-[15px] text-slate-800">
+                    <label htmlFor="letterCompany" className="sr-only">
+                      Company name
+                    </label>
+                    <input
+                      id="letterCompany"
+                      type="text"
+                      value={company}
+                      placeholder="Company name"
+                      onChange={(e) => {
+                        setCompany(e.target.value);
+                        setIsEdited(true);
+                      }}
+                      className="letter-inline letter-text"
+                    />
+                  </div>
+
                   <label htmlFor="letterEditor" className="sr-only">
-                    Cover letter text (editable)
+                    Cover letter body (editable)
                   </label>
                   <textarea
                     id="letterEditor"
                     ref={editorRef}
-                    value={letterText}
+                    value={bodyText}
                     spellCheck
                     onChange={(e) => {
-                      setLetterText(e.target.value);
+                      setBodyText(e.target.value);
                       setIsEdited(true);
                     }}
                     className="letter-editor letter-text text-slate-900"
@@ -489,7 +571,21 @@ export default function Home() {
 
       {/* Print-only copy of the letter: the only thing rendered by window.print(). */}
       <article id="print-letter" className="print-only" aria-hidden="true">
-        <div className="letter-text">{letterText}</div>
+        {header.name && <p className="print-name">{header.name.toUpperCase()}</p>}
+        {header.contact && <p className="print-contact">{header.contact}</p>}
+        {(header.name || header.contact) && <div className="print-rule" />}
+        {header.date && <p>{header.date}</p>}
+        {header.company && <p>{header.company}</p>}
+        {toParagraphs(bodyText).map((lines, i) => (
+          <p key={i}>
+            {lines.map((line, j) => (
+              <span key={j}>
+                {j > 0 && <br />}
+                {line}
+              </span>
+            ))}
+          </p>
+        ))}
       </article>
     </>
   );
@@ -558,7 +654,7 @@ function ToolbarButton({
 
 function EmptyState() {
   return (
-    <div className="flex min-h-[600px] flex-col items-center justify-center text-center">
+    <div className="flex min-h-[860px] flex-col items-center justify-center text-center font-sans">
       <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 text-indigo-600">
         <DocumentIcon className="h-6 w-6" />
       </div>
@@ -572,26 +668,26 @@ function EmptyState() {
 }
 
 function LetterSkeleton() {
-  const widths = ["w-1/3", "w-1/4", "", "w-1/2", "", "w-full", "w-full", "w-11/12", "w-4/5", ""];
+  const block = (w: string, key: string) => (
+    <div key={key} className={`h-3.5 animate-pulse rounded bg-slate-200 ${w}`} />
+  );
   return (
-    <div aria-label="Generating cover letter" role="status" className="animate-pulse space-y-3">
-      {widths.map((w, i) =>
-        w ? (
-          <div key={i} className={`h-3.5 rounded bg-slate-200 ${w}`} />
-        ) : (
-          <div key={i} className="h-3" />
-        ),
-      )}
-      {["w-full", "w-full", "w-10/12", "w-full", "w-3/4"].map((w, i) => (
-        <div key={`b${i}`} className={`h-3.5 rounded bg-slate-200 ${w}`} />
-      ))}
-      <div className="h-3" />
-      {["w-full", "w-11/12", "w-2/3"].map((w, i) => (
-        <div key={`c${i}`} className={`h-3.5 rounded bg-slate-200 ${w}`} />
-      ))}
-      <div className="h-3" />
-      <div className="h-3.5 w-1/5 rounded bg-slate-200" />
-      <div className="h-3.5 w-1/4 rounded bg-slate-200" />
+    <div aria-label="Generating cover letter" role="status" className="space-y-3">
+      {block("w-1/3", "n1")}
+      {block("w-1/4", "n2")}
+      <div className="h-8" />
+      {block("w-1/2", "d1")}
+      <div className="h-6" />
+      {block("w-1/3", "g1")}
+      <div className="h-4" />
+      {["w-full", "w-full", "w-11/12", "w-4/5"].map((w, i) => block(w, `o${i}`))}
+      <div className="h-4" />
+      {["w-full", "w-full", "w-10/12", "w-full", "w-3/4"].map((w, i) => block(w, `b${i}`))}
+      <div className="h-4" />
+      {["w-full", "w-11/12", "w-2/3"].map((w, i) => block(w, `c${i}`))}
+      <div className="h-6" />
+      {block("w-1/5", "s1")}
+      {block("w-1/4", "s2")}
     </div>
   );
 }

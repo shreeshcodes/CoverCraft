@@ -55,7 +55,8 @@ Success (`200`):
 
 ```json
 {
-  "recipient": "string",
+  "company": "string",
+  "date": "string (server date, e.g. November 4, 2026)",
   "greeting": "string",
   "opening": "string",
   "body": "string",

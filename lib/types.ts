@@ -16,7 +16,8 @@ export interface GenerateRequest {
 }
 
 export interface CoverLetter {
-  recipient: string;
+  company: string;
+  date: string;
   greeting: string;
   opening: string;
   body: string;
@@ -30,14 +31,14 @@ export interface GenerateErrorResponse {
   details?: string;
 }
 
-export const COVER_LETTER_FIELDS = [
-  "recipient",
+/** Fields the model writes. `date` and `fullText` are added by the server. */
+export const MODEL_FIELDS = [
+  "company",
   "greeting",
   "opening",
   "body",
   "closing",
   "signoff",
-  "fullText",
 ] as const satisfies readonly (keyof CoverLetter)[];
 
 /** Server-side input limits (characters). Generous enough for long resumes/postings. */
