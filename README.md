@@ -37,6 +37,21 @@ Open http://localhost:3000.
 
 The API key is read only in the server route. It never reaches the browser.
 
+## Sign-in setup
+
+The generator requires sign-in with Google or LinkedIn. Both are free to set up. Keys go in `.env.local`, never in the code.
+
+1. **AUTH_SECRET:** in PowerShell, run this and paste the output after `AUTH_SECRET=`:
+
+   ```powershell
+   $b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
+   ```
+
+2. **Google:** create an OAuth client (type "Web application") at https://console.cloud.google.com/apis/credentials. Add `http://localhost:3000/api/auth/callback/google` as an authorized redirect URI. Copy the client ID and secret into `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET`. While the consent screen is in "Testing", add your own Google account as a test user.
+2. **LinkedIn:** create an app at https://www.linkedin.com/developers/apps. LinkedIn asks for a Company Page to attach it to. Add the product "Sign In with LinkedIn using OpenID Connect", then add `http://localhost:3000/api/auth/callback/linkedin` under the Auth tab. Copy the client ID and secret into `AUTH_LINKEDIN_ID` and `AUTH_LINKEDIN_SECRET`.
+
+Sign-in only works on `localhost` until the app is deployed. Once deployed, add the public callback URLs to both providers and set `AUTH_URL`.
+
 ## API
 
 `POST /api/generate`

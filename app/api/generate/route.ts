@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import { auth } from "@/auth";
 import {
   MAX_JOB_CHARS,
   MAX_NAME_CHARS,
@@ -186,6 +187,11 @@ async function completeWithFallback(
 }
 
 export async function POST(request: Request) {
+  const session = await auth();
+  if (!session?.user) {
+    return errorResponse(401, "Sign in to generate a cover letter.", "Use Google or LinkedIn on the home page.");
+  }
+
   // ---- Validate input ------------------------------------------------------
   let body: unknown;
   try {
