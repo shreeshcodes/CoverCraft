@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { ApiError, FinishReason, GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 import {
   COVER_LETTER_FIELDS,
@@ -11,20 +11,13 @@ import {
   type Tone,
 } from "@/lib/types";
 
-// The Anthropic SDK needs the Node.js runtime, and generation can take a while.
+// The Gemini SDK needs the Node.js runtime, and generation can take a while.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const DEFAULT_MODEL = "claude-sonnet-5-5";
-
-// Models that accept the server-side refusal fallback (`fallbacks: "default"`).
-const FALLBACK_CAPABLE_MODELS = new Set([
-  "claude-sonnet-5-5",
-  "claude-opus-5-5",
-  "claude-opus-5",
-  "claude-fable-5-1",
-]);
+// Gemini 2.5 Flash is on Google's free tier. Override with GEMINI_MODEL.
+const DEFAULT_MODEL = "gemini-2.5-flash";
 
 const SYSTEM_PROMPT = `You are a top-tier career strategist and executive cover-letter writer. You turn an applicant's resume and a target job posting into a compelling, tailored cover letter that gets interviews.
 
@@ -135,17 +128,17 @@ export async function POST(request: Request) {
     return errorResponse(400, `jobText must be at most ${MAX_JOB_CHARS} characters.`);
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) {
     return errorResponse(
       500,
-      "Server is missing ANTHROPIC_API_KEY.",
-      "Add ANTHROPIC_API_KEY to .env.local (see .env.example) and restart the server.",
+      "Server is missing GEMINI_API_KEY.",
+      "Add GEMINI_API_KEY to .env.local (see .env.example) and restart the server.",
     );
   }
 
-  // ---- Call Claude -----------------------------------------------------------
-  const model = process.env.ANTHROPIC_MODEL?.trim() || DEFAULT_MODEL;
-  const useFallbacks = FALLBACK_CAPABLE_MODELS.has(model);
+  // ---- Call Gemini -----------------------------------------------------------
+  const model = process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL;
 
   const userPrompt = [
     `Applicant name: ${applicantName || "(not provided; use the name from the resume, if present)"}`,
@@ -163,42 +156,52 @@ export async function POST(request: Request) {
   ].join("\n");
 
   try {
-    const client = new Anthropic();
-    const response = await client.beta.messages.create({
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
       model,
-      max_tokens: 16000,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userPrompt }],
-      output_config: {
-        effort: "medium",
-        format: { type: "json_schema", schema: COVER_LETTER_SCHEMA },
+      contents: userPrompt,
+      config: {
+        systemInstruction: SYSTEM_PROMPT,
+        responseMimeType: "application/json",
+        responseJsonSchema: COVER_LETTER_SCHEMA,
+        // Thinking tokens count toward this limit, so leave generous headroom.
+        maxOutputTokens: 16384,
       },
-      ...(useFallbacks
-        ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }
-        : {}),
     });
 
-    if (response.stop_reason === "refusal") {
+    const blockReason = response.promptFeedback?.blockReason;
+    if (blockReason) {
       return errorResponse(
         500,
-        "Claude declined to write this cover letter.",
-        response.stop_details?.explanation ?? "Try rephrasing or trimming the input.",
+        "Gemini declined to write this cover letter.",
+        `Prompt was blocked (${blockReason}). Try rephrasing or trimming the input.`,
       );
     }
-    if (response.stop_reason === "max_tokens") {
+
+    const finishReason = response.candidates?.[0]?.finishReason;
+    if (finishReason === FinishReason.MAX_TOKENS) {
       return errorResponse(
         500,
         "The response was cut off before the letter was complete.",
         "Try shortening the resume or job description and generate again.",
       );
     }
+    if (
+      finishReason === FinishReason.SAFETY ||
+      finishReason === FinishReason.BLOCKLIST ||
+      finishReason === FinishReason.PROHIBITED_CONTENT ||
+      finishReason === FinishReason.SPII
+    ) {
+      return errorResponse(
+        500,
+        "Gemini declined to write this cover letter.",
+        `Response was stopped (${finishReason}). Try rephrasing or trimming the input.`,
+      );
+    }
 
-    const text = response.content
-      .filter((block): block is Anthropic.Beta.BetaTextBlock => block.type === "text")
-      .map((block) => block.text)
-      .join("");
+    const text = response.text?.trim();
     if (!text) {
-      return errorResponse(500, "Claude returned an empty response.");
+      return errorResponse(500, "Gemini returned an empty response.");
     }
 
     let letter: CoverLetter;
@@ -214,28 +217,40 @@ export async function POST(request: Request) {
 
     return NextResponse.json(letter);
   } catch (error) {
-    console.error("[api/generate] Anthropic request failed:", error);
+    console.error("[api/generate] Gemini request failed:", error);
 
-    if (error instanceof Anthropic.AuthenticationError) {
-      return errorResponse(500, "Anthropic rejected the API key.", "Check ANTHROPIC_API_KEY.");
-    }
-    if (error instanceof Anthropic.RateLimitError) {
-      return errorResponse(500, "Rate limited by the Anthropic API.", "Wait a moment and retry.");
-    }
-    if (error instanceof Anthropic.NotFoundError) {
+    if (error instanceof ApiError) {
+      if (error.status === 401 || error.status === 403) {
+        return errorResponse(
+          500,
+          "Gemini rejected the API key.",
+          "Check GEMINI_API_KEY and that the Gemini API is enabled for its project.",
+        );
+      }
+      if (error.status === 404) {
+        return errorResponse(
+          500,
+          `Model "${model}" was not found.`,
+          "Check GEMINI_MODEL, or unset it to use the default.",
+        );
+      }
+      if (error.status === 429) {
+        return errorResponse(
+          500,
+          "Rate limited by the Gemini API.",
+          "The free tier has per-minute and daily limits. Wait a moment and retry.",
+        );
+      }
+      if (error.status === 400 && /api key/i.test(error.message)) {
+        return errorResponse(500, "Gemini rejected the API key.", "Check GEMINI_API_KEY.");
+      }
       return errorResponse(
         500,
-        `Model "${model}" was not found.`,
-        "Check ANTHROPIC_MODEL, or unset it to use the default.",
-      );
-    }
-    if (error instanceof Anthropic.APIError) {
-      return errorResponse(
-        500,
-        `Anthropic API error${error.status ? ` (${error.status})` : ""}.`,
+        `Gemini API error (${error.status}).`,
         error.message,
       );
     }
+
     return errorResponse(
       500,
       "Unexpected error while generating the cover letter.",
