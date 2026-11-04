@@ -9,10 +9,10 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@google/genai": "^2.32.0",
     "docx": "^9.15.2",
     "file-saver": "^2.0.5",
     "next": "^16.4.5",
+    "openai": "^7.50.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

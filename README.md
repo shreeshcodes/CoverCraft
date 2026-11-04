@@ -2,13 +2,13 @@
 
 **AI cover letters, tailored to the role and grounded in your resume.**
 
-CoverCraft is a single-page Next.js app that turns your resume and a job posting into a tailored cover letter using Google Gemini. You can edit the letter in place, then export it as **Word (.docx)**, **PDF**, or **plain text**, or copy it to the clipboard.
+CoverCraft is a single-page Next.js app that turns your resume and a job posting into a tailored cover letter using Groq (Llama). You can edit the letter in place, then export it as **Word (.docx)**, **PDF**, or **plain text**, or copy it to the clipboard.
 
 ![Stack](https://img.shields.io/badge/Next.js-16-black) ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue) ![Tailwind](https://img.shields.io/badge/Tailwind_CSS-4-38bdf8)
 
 ## Features
 
-- **Grounded generation:** Gemini acts as a career strategist and writes only from facts in your resume, matched against the job's requirements.
+- **Grounded generation:** The AI model acts as a career strategist and writes only from facts in your resume, matched against the job's requirements.
 - **Tone control:** Professional, Confident & Bold, Modern Startup, Warm & Personable, or Concise & Direct.
 - **Live editable preview:** the letter renders on a document-style page that you can edit directly.
 - **Exports:**
@@ -31,8 +31,8 @@ Open http://localhost:3000.
 
 | Variable            | Required | Description                                                                 |
 | ------------------- | -------- | --------------------------------------------------------------------------- |
-| `GEMINI_API_KEY`    | Yes      | A free key from https://aistudio.google.com/apikey. Server-side only.         |
-| `GEMINI_MODEL`      | No       | Gemini model ID. Defaults to `gemini-3.8-flash`.                             |
+| `GROQ_API_KEY`      | Yes      | Your key from https://console.groq.com/keys. Server-side only.               |
+| `GROQ_MODEL`        | No       | Model ID. Defaults to `llama-3.3-70b-versatile`.                             |
 
 The API key is read only in the server route. It never reaches the browser.
 
@@ -65,15 +65,15 @@ Success (`200`):
 }
 ```
 
-Errors return `{ "error": string, "details"?: string }`. The status is `400` for invalid input and `500` when the Gemini call fails (bad or missing key, rate limit, refusal, unknown model, and so on).
+Errors return `{ "error": string, "details"?: string }`. The status is `400` for invalid input and `500` when the Groq call fails (bad or missing key, rate limit, refusal, unknown model, and so on).
 
-The response shape is enforced with Gemini's **structured output** (`responseMimeType: "application/json"` plus a JSON schema), so the route always gets parseable JSON.
+The response is requested in JSON mode (`response_format: json_object`), and every field is checked before the letter is returned.
 
 ## Project structure
 
 ```
 app/
-  api/generate/route.ts   # Server route: validates input, calls Gemini, returns JSON
+  api/generate/route.ts   # Server route: validates input, calls Groq, returns JSON
   globals.css             # Tailwind + @media print rules for PDF export
   layout.tsx
   page.tsx                # Two-column UI: inputs, editable preview, export toolbar
@@ -91,4 +91,4 @@ lib/
 
 ## Deploying
 
-The app runs as-is on Vercel or any Node.js host. Set `GEMINI_API_KEY` in the host's environment settings. The generate route sets `maxDuration = 60` so that longer generations aren't cut off on serverless platforms.
+The app runs as-is on Vercel or any Node.js host. Set `GROQ_API_KEY` in the host's environment settings. The generate route sets `maxDuration = 60` so that longer generations aren't cut off on serverless platforms.
